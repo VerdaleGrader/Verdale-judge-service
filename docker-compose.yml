@@ -37,6 +37,9 @@ services:
       VERDALE_JUDGE_REDIS_PASSWORD: ${REDIS_PASSWORD}
       VERDALE_JUDGE_QUEUE_CONSUMER_NAME: judge-dev
     volumes:
+      # Used by the default local storage driver. With
+      # VERDALE_JUDGE_STORAGE_DRIVER=s3 (set in .env, see .env.example) Judge
+      # reads the R2 tests bucket instead and ignores this mount.
       - ./dev/storage:/var/lib/verdale-judge/storage:ro
       - judge-cache:/var/lib/verdale-judge/cache
     ports:
