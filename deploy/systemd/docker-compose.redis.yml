@@ -1,0 +1,11 @@
+# Redis for the Judge machine. Bound to 127.0.0.1 only: never reachable from
+# outside the machine. AOF keeps the queue and outbox across restarts.
+services:
+  redis:
+    image: redis:7.4.1-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--requirepass", "${REDIS_PASSWORD:?}"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - /var/lib/verdale-judge/redis:/data
+    restart: always

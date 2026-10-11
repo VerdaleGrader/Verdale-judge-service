@@ -1,0 +1,67 @@
+{
+  "environment": "local",
+  "server": { "host": "0.0.0.0", "port": 8081, "max_body_bytes": 1048576 },
+  "log": { "level": "info", "format": "console" },
+  "redis": { "addr": "redis:6379", "password": "", "db": 0 },
+  "auth": { "inbound_keys": "", "timestamp_tolerance_seconds": 300 },
+  "callback": {
+    "key_id": "",
+    "secret": "",
+    "allowed_url_prefixes": ["http://mockcore:8090/", "http://host.docker.internal:8080/internal/judge/"],
+    "timeout_seconds": 10,
+    "initial_backoff_ms": 1000,
+    "max_backoff_seconds": 300,
+    "retry_window_minutes": 1440,
+    "poll_interval_ms": 500,
+    "dispatch_concurrency": 4
+  },
+  "queue": {
+    "stream": "judge:jobs",
+    "group": "judge-workers",
+    "dead_letter_stream": "judge:jobs:dead",
+    "consumer_name": "",
+    "reclaim_idle_seconds": 30,
+    "reclaim_interval_seconds": 10,
+    "max_deliveries": 3,
+    "metrics_interval_seconds": 5,
+    "job_ttl_hours": 168
+  },
+  "worker": { "concurrency": 2, "shutdown_timeout_seconds": 300 },
+  "sandbox": {
+    "driver": "isolate",
+    "isolate_path": "/usr/local/bin/isolate",
+    "cgroup_root": "/sys/fs/cgroup",
+    "box_id_base": 100,
+    "work_dir": "/var/lib/verdale-judge/work",
+    "path": "/usr/local/bin:/usr/bin:/bin",
+    "extra_time_ms": 500,
+    "wall_time_factor": 3,
+    "open_files": 64,
+    "compile": {
+      "time_ms": 10000,
+      "wall_time_ms": 20000,
+      "memory_kb": 524288,
+      "processes": 64,
+      "output_kb": 65536,
+      "message_limit_bytes": 8192
+    }
+  },
+  "languages": {
+    "c": { "binary": "/usr/bin/gcc", "flags": ["-std=c17", "-O2", "-pipe", "-static"], "expected_version": "12.2.0" },
+    "cpp": { "binary": "/usr/bin/g++", "flags": ["-std=c++17", "-O2", "-pipe", "-static"], "expected_version": "12.2.0" },
+    "python": { "binary": "/usr/bin/python3", "flags": ["-B"], "expected_version": "3.11.2" }
+  },
+  "storage": {
+    "driver": "local",
+    "key_prefix": "tests/",
+    "local_dir": "/var/lib/verdale-judge/storage",
+    "s3": { "endpoint": "", "region": "auto", "bucket": "", "access_key_id": "", "secret_access_key": "" }
+  },
+  "cache": {
+    "dir": "/var/lib/verdale-judge/cache",
+    "max_bytes": 10737418240,
+    "max_file_bytes": 268435456,
+    "fetch_attempts": 4,
+    "fetch_backoff_ms": 250
+  }
+}

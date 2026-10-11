@@ -1,0 +1,73 @@
+# Local development: Redis + Judge + a mock Core that receives results.
+#
+#   cp .env.example .env
+#   docker compose up --build
+#   make submit SOURCE=examples/aplusb/solutions/ac.cpp
+#
+# Redis is only on the internal network (no published port), keeps its queue
+# on disk with AOF, and requires a password - the same setup as production.
+
+services:
+  redis:
+    image: redis:7.4.1-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"]
+    volumes:
+      - redis-data:/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    restart: unless-stopped
+
+  judge:
+    build:
+      context: .
+      target: judge
+    # isolate needs to manage control groups; development and CI only.
+    # Production runs Judge on the host with systemd (deploy/systemd).
+    privileged: true
+    cgroup: private
+    env_file: .env
+    environment:
+      VERDALE_JUDGE_REDIS_ADDR: redis:6379
+      VERDALE_JUDGE_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      VERDALE_JUDGE_QUEUE_CONSUMER_NAME: judge-dev
+    volumes:
+      - ./dev/storage:/var/lib/verdale-judge/storage:ro
+      - judge-cache:/var/lib/verdale-judge/cache
+    ports:
+      - "127.0.0.1:8081:8081"
+    networks: [internal, edge]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+    stop_grace_period: 2m
+
+  mockcore:
+    build:
+      context: .
+      target: judge
+    entrypoint: []
+    command: ["mockcore", "-addr", ":8090", "-out", "/results", "-fail-first", "${MOCKCORE_FAIL_FIRST:-0}"]
+    environment:
+      MOCKCORE_KEYS: ${MOCKCORE_KEYS}
+    volumes:
+      - ./tmp/results:/results
+    ports:
+      - "127.0.0.1:8090:8090"
+    networks: [edge]
+
+networks:
+  internal:
+    internal: true
+  edge: {}
+
+volumes:
+  redis-data:
+  judge-cache:

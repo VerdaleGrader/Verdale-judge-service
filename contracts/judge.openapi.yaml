@@ -1,0 +1,426 @@
+openapi: 3.0.3
+info:
+  title: Verdale Judge internal API
+  version: 0.1.0
+  description: |
+    Contract between Core service (producer of jobs, consumer of results) and
+    Judge service (consumer of jobs, producer of results).
+
+    * Core -> Judge: `POST /internal/jobs`, `GET /internal/jobs/{job_id}`.
+    * Judge -> Core: the `jobResult` callback, POSTed to the job's `callback_url`.
+
+    Every request in both directions is signed with HMAC-SHA256 as described in
+    `HMAC.md` (headers `X-Verdale-Key-Id`, `X-Verdale-Timestamp`,
+    `X-Verdale-Signature`). Receivers must ignore unknown JSON fields so that
+    additive contract changes can be deployed in any order (see `CHANGELOG.md`).
+servers:
+  - url: http://localhost:8081
+    description: Local Judge
+security:
+  - verdaleHmac: []
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness probe
+      security: []
+      responses:
+        '200':
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /ready:
+    get:
+      operationId: getReady
+      summary: Readiness probe (Redis reachable and sandbox environment checked)
+      security: []
+      responses:
+        '200':
+          description: Ready to accept jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+        '503':
+          description: Not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+  /internal/jobs:
+    post:
+      operationId: createJob
+      summary: Enqueue a judging job
+      description: |
+        Idempotent by `job_id`. Sending the same `job_id` with the same body
+        returns the current state of the existing job with `duplicate: true`
+        and does not enqueue a second job. Sending the same `job_id` with a
+        different body is rejected with 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobRequest'
+      responses:
+        '202':
+          description: Job accepted (new or duplicate)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAccepted'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '413':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+      callbacks:
+        jobResult:
+          '{$request.body#/callback_url}':
+            post:
+              operationId: postJobResult
+              summary: Judge reports the final result of a job to Core
+              description: |
+                Delivered at least once. Core must treat `job_id` as the
+                idempotency key and answer 2xx for duplicates. 400, 404, 409,
+                410 and 422 are treated as permanent failures by Judge (no
+                retry); any other non-2xx status or a network error is retried
+                with exponential backoff.
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/JobResult'
+              responses:
+                '200':
+                  description: Result stored (or already stored)
+                '204':
+                  description: Result stored (or already stored)
+  /internal/jobs/{job_id}:
+    get:
+      operationId: getJob
+      summary: Current state of a job
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobState'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+components:
+  securitySchemes:
+    verdaleHmac:
+      type: apiKey
+      in: header
+      name: X-Verdale-Signature
+      description: HMAC-SHA256 request signature. See HMAC.md.
+  responses:
+    Error:
+      description: Standard error response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, version]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        version:
+          type: string
+    ReadinessResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        checks:
+          type: object
+          additionalProperties:
+            type: boolean
+    ErrorResponse:
+      type: object
+      description: The one error shape used by every Verdale service.
+      required: [status, error_code, message, request_id]
+      properties:
+        status:
+          type: integer
+          description: HTTP status code, repeated in the body.
+        error_code:
+          type: string
+          description: Stable machine-readable code, e.g. VALIDATION_FAILED.
+        message:
+          type: string
+          description: Human-readable summary. Never contains secrets.
+        request_id:
+          type: string
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErrorDetail'
+    ErrorDetail:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+    Language:
+      type: string
+      description: Language code. Core checks the problem's allowed languages using these codes.
+      enum: [c, cpp, python]
+    JobKind:
+      type: string
+      description: |
+        `submission` stops at the first test that is not AC (remaining tests
+        are SKIPPED). `verify` runs every test (used by the publish gate).
+      enum: [submission, verify]
+    Checker:
+      type: string
+      description: Output checker. `line` ignores trailing whitespace on each line and trailing blank lines.
+      enum: [line]
+    Verdict:
+      type: string
+      description: |
+        Overall verdict of a job.
+        AC accepted, WA wrong answer, TLE time limit exceeded, MLE memory limit
+        exceeded, RE runtime error, CE compilation error (also Python syntax
+        errors), OLE output limit exceeded, ISE internal system error (never
+        the submitter's fault; Core must re-judge and must not count it).
+      enum: [AC, WA, TLE, MLE, RE, CE, OLE, ISE]
+    TestVerdict:
+      type: string
+      enum: [AC, WA, TLE, MLE, RE, OLE, ISE, SKIPPED]
+    JobStatus:
+      type: string
+      enum: [queued, running, completed]
+    Limits:
+      type: object
+      required: [time_ms, memory_kb]
+      properties:
+        time_ms:
+          type: integer
+          minimum: 100
+          maximum: 20000
+          description: CPU time limit per test.
+        memory_kb:
+          type: integer
+          minimum: 16384
+          maximum: 2097152
+          description: Memory limit per test (whole control group).
+        output_kb:
+          type: integer
+          minimum: 1
+          maximum: 65536
+          default: 65536
+          description: Maximum size of standard output per test.
+    TestFile:
+      type: object
+      required: [sha256, size_bytes]
+      properties:
+        sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Lowercase hex SHA-256 of the file. The object key in the test bucket is derived from it.
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 268435456
+    TestCase:
+      type: object
+      required: [id, input, output]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[A-Za-z0-9_.-]+$'
+        input:
+          $ref: '#/components/schemas/TestFile'
+        output:
+          $ref: '#/components/schemas/TestFile'
+        sample:
+          type: boolean
+          default: false
+          description: |
+            Sample tests are visible to solvers. Only for sample tests does the
+            result carry `stdout_preview` and `checker_message`; hidden test
+            content never leaves Judge.
+    JobRequest:
+      type: object
+      required: [job_id, kind, language, source, limits, tests, callback_url]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+          description: Idempotency key, chosen by Core.
+        kind:
+          $ref: '#/components/schemas/JobKind'
+        language:
+          $ref: '#/components/schemas/Language'
+        source:
+          type: string
+          minLength: 1
+          maxLength: 65536
+          description: Source code, UTF-8, at most 65536 bytes.
+        limits:
+          $ref: '#/components/schemas/Limits'
+        checker:
+          $ref: '#/components/schemas/Checker'
+        tests:
+          type: array
+          minItems: 1
+          maxItems: 500
+          description: Run in the given order. IDs must be unique.
+          items:
+            $ref: '#/components/schemas/TestCase'
+        callback_url:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: Where Judge POSTs the JobResult. Must match Judge's allow-list.
+    JobAccepted:
+      type: object
+      required: [job_id, status, accepted_at, duplicate]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        accepted_at:
+          type: string
+          format: date-time
+        duplicate:
+          type: boolean
+          description: True when this job_id had already been accepted.
+    JobState:
+      type: object
+      required: [job_id, status, accepted_at, updated_at]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        accepted_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CompileInfo:
+      type: object
+      required: [ok, message, time_ms]
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+          maxLength: 8192
+          description: Compiler output, truncated, with host paths removed.
+        time_ms:
+          type: integer
+    TestResult:
+      type: object
+      required: [id, verdict, time_ms, memory_kb]
+      properties:
+        id:
+          type: string
+        verdict:
+          $ref: '#/components/schemas/TestVerdict'
+        time_ms:
+          type: integer
+          description: CPU time used. 0 for SKIPPED.
+        memory_kb:
+          type: integer
+          description: Peak resident memory. 0 for SKIPPED.
+        exit_code:
+          type: integer
+        signal:
+          type: integer
+        stdout_preview:
+          type: string
+          maxLength: 1024
+          description: First bytes of the program output. Sample tests only.
+        checker_message:
+          type: string
+          maxLength: 256
+          description: Where the output first differs. Sample tests only.
+    ResultSummary:
+      type: object
+      required: [passed, total, time_ms, memory_kb]
+      properties:
+        passed:
+          type: integer
+        total:
+          type: integer
+        time_ms:
+          type: integer
+          description: Maximum time_ms over executed tests.
+        memory_kb:
+          type: integer
+          description: Maximum memory_kb over executed tests.
+    SystemError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: e.g. TEST_FILE_UNAVAILABLE, SANDBOX_FAILURE, MAX_DELIVERIES_EXCEEDED.
+        message:
+          type: string
+    JobResult:
+      type: object
+      required: [job_id, kind, verdict, tests, summary, judged_at, judge_version]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/JobKind'
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        compile:
+          $ref: '#/components/schemas/CompileInfo'
+        tests:
+          type: array
+          description: One entry per requested test, in request order. Empty for CE and ISE.
+          items:
+            $ref: '#/components/schemas/TestResult'
+        summary:
+          $ref: '#/components/schemas/ResultSummary'
+        error:
+          $ref: '#/components/schemas/SystemError'
+        judged_at:
+          type: string
+          format: date-time
+        judge_version:
+          type: string

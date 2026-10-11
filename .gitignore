@@ -1,0 +1,6 @@
+.env
+bin/
+tmp/
+dev/
+coverage.out
+__debug_bin*

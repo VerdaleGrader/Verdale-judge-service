@@ -1,0 +1,26 @@
+# /etc/systemd/system/verdale-judge.service
+# Judge runs on the host (not in Docker) so isolate gets a properly
+# delegated cgroup v2 subtree from isolate.service.
+[Unit]
+Description=Verdale Judge service
+Requires=isolate.service
+After=network-online.target isolate.service docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+# Secrets (keys, Redis password, R2 read-only token) come from this file,
+# readable by root only. See deploy/systemd/README.md.
+EnvironmentFile=/etc/verdale-judge/judge.env
+Environment=VERDALE_JUDGE_CONFIG=/etc/verdale-judge/config.json
+ExecStart=/usr/local/bin/verdale-judge
+Restart=on-failure
+RestartSec=5
+# Must exceed worker.shutdown_timeout_seconds so running jobs can finish.
+TimeoutStopSec=330
+KillSignal=SIGTERM
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

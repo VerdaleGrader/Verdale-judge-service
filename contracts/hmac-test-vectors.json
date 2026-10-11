@@ -1,0 +1,38 @@
+{
+  "description": "HMAC-SHA256 signing test vectors. See HMAC.md. Secrets here are test-only.",
+  "vectors": [
+    {
+      "key_id": "core-2026-10",
+      "secret": "verdale-test-secret-0123456789abcdef-core",
+      "timestamp": 1791700000,
+      "method": "POST",
+      "path": "/internal/jobs",
+      "body": "{\"job_id\":\"7d3f1c2a-5b8e-4f61-9a0c-2e4b6d8f1a3c\",\"kind\":\"submission\"}",
+      "body_sha256": "23b60b32359c3e6b332a62890c5a5d47295039e8aab0a26a64bcc7eb58b526c0",
+      "string_to_sign": "v1\n1791700000\nPOST\n/internal/jobs\n23b60b32359c3e6b332a62890c5a5d47295039e8aab0a26a64bcc7eb58b526c0",
+      "signature": "v1=3cbc9732b30ff83e4abfda44ebbd6580d7d7d6c75494d2e7cf8b0dce8e022e15"
+    },
+    {
+      "key_id": "core-2026-10",
+      "secret": "verdale-test-secret-0123456789abcdef-core",
+      "timestamp": 1791700123,
+      "method": "GET",
+      "path": "/internal/jobs/7d3f1c2a-5b8e-4f61-9a0c-2e4b6d8f1a3c",
+      "body": "",
+      "body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "string_to_sign": "v1\n1791700123\nGET\n/internal/jobs/7d3f1c2a-5b8e-4f61-9a0c-2e4b6d8f1a3c\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "signature": "v1=7a13ea4312044b857eccae1183abaee171b896bba17a59429174ea1ee540b35b"
+    },
+    {
+      "key_id": "judge-2026-10",
+      "secret": "verdale-test-secret-fedcba9876543210-judge",
+      "timestamp": 1791700456,
+      "method": "POST",
+      "path": "/internal/judge/results?attempt=2",
+      "body": "{\"job_id\":\"7d3f1c2a-5b8e-4f61-9a0c-2e4b6d8f1a3c\",\"verdict\":\"AC\",\"note\":\"ภาษาไทย\"}",
+      "body_sha256": "d9b5ce380f517ad0e96847e5268bb5bc8addb2faa46e1f8f92e07624ef574887",
+      "string_to_sign": "v1\n1791700456\nPOST\n/internal/judge/results?attempt=2\nd9b5ce380f517ad0e96847e5268bb5bc8addb2faa46e1f8f92e07624ef574887",
+      "signature": "v1=93be2d821a63cf0f7306a54e657a58c218f97211b20b6b5569a6b41ccb87d364"
+    }
+  ]
+}

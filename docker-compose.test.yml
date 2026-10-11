@@ -1,0 +1,16 @@
+# Integration tests against a real isolate sandbox and a real Redis.
+#   make test-integration
+services:
+  redis:
+    image: redis:7.4.1-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "integration-test-password"]
+  integration:
+    build:
+      context: .
+      target: integration
+    privileged: true
+    cgroup: private
+    environment:
+      INTEGRATION_REDIS_ADDR: redis:6379
+      INTEGRATION_REDIS_PASSWORD: integration-test-password
+    depends_on: [redis]
