@@ -1,11 +1,11 @@
 {
-  "version": "0.4.0",
+  "version": "0.5.0",
   "source": "Verdale-core-service/contracts",
   "files": {
-    "judge.openapi.yaml": "03c887d1491160cee2bc7b47c969699a381fb87a9f06cdc41cc9ee3f8702609d",
+    "judge.openapi.yaml": "40026220c3c6c3510222b48c6e1af2f1d6870ebdade7d3b1fb824f9e4b672c69",
     "HMAC.md": "81b49fea72d53051671b32c7b74b37d5e4f3ce0b6a4411a2f7193054cf79b356",
     "hmac-test-vectors.json": "a4af12115a989911c282edf0ffaf2093dc9e7e2b1474ff1fc8b272ec4c73309e",
-    "VERSION": "40b8eb4000a913a7791090535f291d3d369874162a89ef3c9e3d4e887a1b9e79",
-    "CHANGELOG.md": "d2262e33f60253579b78f1e6a399e3691578040c1e94866333f154450d38e6bc"
+    "VERSION": "a0ad50640139a524f86591157145bf1d4674ea9c065bfea21558f0f7b04430c8",
+    "CHANGELOG.md": "fec9392eeca64d798e122675f30a1300960c33693bcc6ef16b082686c20cc711"
   }
 }
