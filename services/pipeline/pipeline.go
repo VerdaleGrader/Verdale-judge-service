@@ -31,13 +31,14 @@ const (
 )
 
 const (
-	defaultOutputKB    = 65536
-	stdoutPreviewBytes = 1024
-	checkerMessageMax  = 256
-	inputFile          = "input.txt"
-	outputFile         = "output.txt"
-	stderrFile         = "stderr.txt"
-	compileLogFile     = "compile.log"
+	defaultOutputKB     = 65536
+	defaultCaptureTotal = 2 * 1024 * 1024
+	stdoutPreviewBytes  = 1024
+	checkerMessageMax   = 256
+	inputFile           = "input.txt"
+	outputFile          = "output.txt"
+	stderrFile          = "stderr.txt"
+	compileLogFile      = "compile.log"
 )
 
 // SystemError is a failure of Judge itself.
@@ -119,12 +120,17 @@ func (p *Pipeline) Execute(ctx context.Context, job contract.JobRequest) (contra
 			return contract.JobResult{}, systemError(CodeTestFileUnavailable, "test %s input: %v", test.Id, err)
 		}
 		defer releaseInput()
-		outputPath, releaseOutput, err := p.fetcher.Fetch(ctx, test.Output)
+		inputs[index] = inputPath
+		// A generate job compares nothing, so it has no expected output to fetch.
+		if job.Kind == contract.JobKindGenerate || test.Output == nil {
+			continue
+		}
+		outputPath, releaseOutput, err := p.fetcher.Fetch(ctx, *test.Output)
 		if err != nil {
 			return contract.JobResult{}, systemError(CodeTestFileUnavailable, "test %s output: %v", test.Id, err)
 		}
 		defer releaseOutput()
-		inputs[index], expected[index] = inputPath, outputPath
+		expected[index] = outputPath
 	}
 
 	result := contract.JobResult{
@@ -147,13 +153,14 @@ func (p *Pipeline) Execute(ctx context.Context, job contract.JobRequest) (contra
 	}
 
 	stopOnFailure := job.Kind == contract.JobKindSubmission
+	capture := newCapture(job)
 	stopped := false
 	for index, test := range job.Tests {
 		if stopped {
 			result.Tests = append(result.Tests, contract.TestResult{Id: test.Id, Verdict: contract.TestVerdictSKIPPED})
 			continue
 		}
-		testResult, err := p.runTest(ctx, language, artifactPath, job.Limits, test, inputs[index], expected[index], checker)
+		testResult, err := p.runTest(ctx, language, artifactPath, job, test, inputs[index], expected[index], checker, capture)
 		if err != nil {
 			return contract.JobResult{}, err
 		}
@@ -231,8 +238,9 @@ func (p *Pipeline) compile(ctx context.Context, language runner.Language, source
 	return info, artifactPath, nil
 }
 
-func (p *Pipeline) runTest(ctx context.Context, language runner.Language, artifactPath string, limits contract.Limits,
-	test contract.TestCase, inputPath, expectedPath string, checker comparator.Checker) (contract.TestResult, error) {
+func (p *Pipeline) runTest(ctx context.Context, language runner.Language, artifactPath string, job contract.JobRequest,
+	test contract.TestCase, inputPath, expectedPath string, checker comparator.Checker, capture *capture) (contract.TestResult, error) {
+	limits := job.Limits
 	box, err := p.sandbox.Acquire(ctx)
 	if err != nil {
 		return contract.TestResult{}, systemError(CodeSandboxFailure, "acquire box for test %s: %v", test.Id, err)
@@ -304,6 +312,14 @@ func (p *Pipeline) runTest(ctx context.Context, language runner.Language, artifa
 		result.Verdict = contract.TestVerdictRE
 		result.Signal = &run.Signal
 	case sandbox.StatusOK:
+		if job.Kind == contract.JobKindGenerate {
+			// Nothing to compare: the run is good when its whole output fits what was asked for.
+			result.Verdict = contract.TestVerdictAC
+			if !capture.fits(outputPath) {
+				result.Verdict = contract.TestVerdictOLE
+			}
+			break
+		}
 		verdict, message, err := compareOutput(checker, expectedPath, outputPath)
 		if err != nil {
 			return contract.TestResult{}, systemError(CodeSandboxFailure, "compare test %s: %v", test.Id, err)
@@ -317,8 +333,10 @@ func (p *Pipeline) runTest(ctx context.Context, language runner.Language, artifa
 		return contract.TestResult{}, systemError(CodeSandboxFailure, "test %s: sandbox status %s", test.Id, status)
 	}
 
-	// Only sample tests may echo output back: hidden test content (which a
-	// program could copy from its input to its output) never leaves Judge.
+	// Only sample tests may echo output back, unless Core asked to capture it:
+	// hidden test content (which a program could copy from its input to its
+	// output) otherwise never leaves Judge.
+	capture.record(&result, outputPath, filepath.Join(box.Dir(), stderrFile))
 	if isSample {
 		preview, _ := readPrefix(outputPath, stdoutPreviewBytes)
 		text := runner.TruncateUTF8(strings.ToValidUTF8(string(preview), "\uFFFD"), stdoutPreviewBytes)
