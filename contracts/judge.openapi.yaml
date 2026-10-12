@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Verdale Judge internal API
-  version: 0.1.0
+  version: 0.3.0
   description: |
     Contract between Core service (producer of jobs, consumer of results) and
     Judge service (consumer of jobs, producer of results).
@@ -88,7 +88,8 @@ paths:
               operationId: postJobResult
               summary: Judge reports the final result of a job to Core
               description: |
-                Delivered at least once. Core must treat `job_id` as the
+                Delivered at least once to `callback_url`, which Core sets to
+                `{CORE_INTERNAL_URL}/internal/judge/result`. Core must treat `job_id` as the
                 idempotency key and answer 2xx for duplicates. 400, 404, 409,
                 410 and 422 are treated as permanent failures by Judge (no
                 retry); any other non-2xx status or a network error is retried
