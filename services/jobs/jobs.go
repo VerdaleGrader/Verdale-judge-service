@@ -36,10 +36,6 @@ const (
 	MaxTests         = 500
 	MaxTestIDLength  = 64
 	MaxCallbackBytes = 2048
-
-	MaxCaptureStdoutBytes = 8388608
-	MaxCaptureStderrBytes = 16384
-	MaxCaptureTotalBytes  = 16777216
 )
 
 var (
@@ -129,12 +125,9 @@ func (s *service) Validate(request contract.JobRequest) []contract.ErrorDetail {
 	if request.JobId == uuid.Nil {
 		add("job_id", "is required")
 	}
-	switch request.Kind {
-	case contract.JobKindSubmission, contract.JobKindVerify, contract.JobKindGenerate:
-	default:
-		add("kind", "must be submission, verify or generate")
+	if request.Kind != contract.JobKindSubmission && request.Kind != contract.JobKindVerify {
+		add("kind", "must be submission or verify")
 	}
-	details = append(details, validateCapture(request)...)
 	switch request.Language {
 	case contract.LanguageC, contract.LanguageCpp, contract.LanguagePython:
 	default:
@@ -175,15 +168,7 @@ func (s *service) Validate(request contract.JobRequest) []contract.ErrorDetail {
 			add(field+".id", "duplicates another test id %q", test.Id)
 		}
 		seen[test.Id] = true
-		files := map[string]contract.TestFile{"input": test.Input}
-		switch {
-		case test.Output != nil:
-			files["output"] = *test.Output
-		case request.Kind != contract.JobKindGenerate:
-			// The expected output is only optional when nothing is compared.
-			add(field+".output", "is required")
-		}
-		for name, file := range files {
+		for name, file := range map[string]contract.TestFile{"input": test.Input, "output": test.Output} {
 			if !sha256Pattern.MatchString(file.Sha256) {
 				add(field+"."+name+".sha256", "must be 64 lowercase hex characters")
 			}
@@ -195,35 +180,6 @@ func (s *service) Validate(request contract.JobRequest) []contract.ErrorDetail {
 
 	if message := s.checkCallbackURL(request.CallbackUrl); message != "" {
 		add("callback_url", "%s", message)
-	}
-	return details
-}
-
-// validateCapture checks the optional `capture` request. A generate job is
-// useless without capturing standard output, so it must ask for it.
-func validateCapture(request contract.JobRequest) []contract.ErrorDetail {
-	var details []contract.ErrorDetail
-	add := func(field, format string, args ...any) {
-		details = append(details, contract.ErrorDetail{Field: field, Message: fmt.Sprintf(format, args...)})
-	}
-	capture := request.Capture
-	if capture == nil {
-		if request.Kind == contract.JobKindGenerate {
-			add("capture.stdout_bytes", "is required for a generate job")
-		}
-		return details
-	}
-	if capture.StdoutBytes != nil && (*capture.StdoutBytes < 0 || *capture.StdoutBytes > MaxCaptureStdoutBytes) {
-		add("capture.stdout_bytes", "must be between 0 and %d", MaxCaptureStdoutBytes)
-	}
-	if capture.StderrBytes != nil && (*capture.StderrBytes < 0 || *capture.StderrBytes > MaxCaptureStderrBytes) {
-		add("capture.stderr_bytes", "must be between 0 and %d", MaxCaptureStderrBytes)
-	}
-	if capture.TotalBytes != nil && (*capture.TotalBytes < 1 || *capture.TotalBytes > MaxCaptureTotalBytes) {
-		add("capture.total_bytes", "must be between 1 and %d", MaxCaptureTotalBytes)
-	}
-	if request.Kind == contract.JobKindGenerate && (capture.StdoutBytes == nil || *capture.StdoutBytes < 1) {
-		add("capture.stdout_bytes", "must be at least 1 for a generate job")
 	}
 	return details
 }

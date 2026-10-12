@@ -37,7 +37,6 @@ type fakeSandbox struct {
 type fakeRun struct {
 	status sandbox.Status
 	output string
-	stderr string
 	cpu    time.Duration
 	rssKB  int
 	err    error
@@ -87,9 +86,6 @@ func (b *fakeBox) Run(_ context.Context, request sandbox.RunRequest) (sandbox.Ru
 		return sandbox.RunResult{Status: sandbox.StatusInternal}, run.err
 	}
 	_ = os.WriteFile(filepath.Join(b.dir, request.Stdout), []byte(run.output), 0o644)
-	if request.Stderr != "" && run.stderr != "" {
-		_ = os.WriteFile(filepath.Join(b.dir, request.Stderr), []byte(run.stderr), 0o644)
-	}
 	return sandbox.RunResult{Status: run.status, CPUTime: run.cpu, MaxRSSKB: run.rssKB, ExitCode: 1, Signal: 11}, nil
 }
 
@@ -126,7 +122,7 @@ func testCase(id, input, expected string, sample bool) contract.TestCase {
 	return contract.TestCase{
 		Id:     id,
 		Input:  contract.TestFile{Sha256: input, SizeBytes: int64(len(input))},
-		Output: &contract.TestFile{Sha256: expected, SizeBytes: int64(len(expected))},
+		Output: contract.TestFile{Sha256: expected, SizeBytes: int64(len(expected))},
 		Sample: &sample,
 	}
 }
@@ -250,178 +246,4 @@ func TestSystemErrorsAreNotVerdicts(t *testing.T) {
 	require.ErrorAs(t, err, &systemErr)
 	assert.Equal(t, CodeSandboxFailure, systemErr.Code)
 	assert.Equal(t, fake.acquired, fake.cleaned, "boxes are cleaned up on failure too")
-}
-
-// countingFetcher records every file asked for.
-type countingFetcher struct {
-	mapFetcher
-	fetched []string
-}
-
-func (f *countingFetcher) Fetch(ctx context.Context, file contract.TestFile) (string, func(), error) {
-	f.fetched = append(f.fetched, file.Sha256)
-	return f.mapFetcher.Fetch(ctx, file)
-}
-
-func withCapture(request contract.JobRequest, stdout, stderr int, total *int) contract.JobRequest {
-	request.Capture = &contract.Capture{StdoutBytes: &stdout, StderrBytes: &stderr, TotalBytes: total}
-	return request
-}
-
-func TestCaptureReturnsOutputOfHiddenTestsToo(t *testing.T) {
-	fake := &fakeSandbox{t: t, compileOK: true, byInput: map[string]fakeRun{
-		"in1": {status: sandbox.StatusOK, output: "ok\n"},
-		"in2": {status: sandbox.StatusOK, output: "wrong\n", stderr: "warning: /box/main.cpp:3 careful\n"},
-	}}
-	request := withCapture(job(contract.JobKindSubmission,
-		testCase("1", "in1", "ok\n", true), testCase("2", "in2", "right\n", false)), 1024, 1024, nil)
-
-	result, err := newPipeline(t, fake, mapFetcher{t: t}).Execute(context.Background(), request)
-	require.NoError(t, err)
-	assert.Equal(t, "1=AC 2=WA", verdicts(result))
-
-	hidden := result.Tests[1]
-	require.NotNil(t, hidden.Stdout)
-	assert.Equal(t, "wrong\n", *hidden.Stdout, "the program output of a hidden test is sent when Core asks for it")
-	require.NotNil(t, hidden.StdoutSizeBytes)
-	assert.Equal(t, int64(6), *hidden.StdoutSizeBytes)
-	require.NotNil(t, hidden.Stderr)
-	assert.Equal(t, "warning: main.cpp:3 careful\n", *hidden.Stderr, "host paths are removed from standard error")
-	assert.Nil(t, hidden.StdoutPreview, "the preview stays for sample tests only")
-	assert.Nil(t, hidden.CheckerMessage)
-
-	sample := result.Tests[0]
-	require.NotNil(t, sample.Stdout)
-	assert.Equal(t, "ok\n", *sample.Stdout)
-	require.NotNil(t, sample.StdoutPreview)
-}
-
-func TestWithoutCaptureHiddenOutputNeverLeaves(t *testing.T) {
-	fake := &fakeSandbox{t: t, compileOK: true, byInput: map[string]fakeRun{
-		"in": {status: sandbox.StatusOK, output: "secret\n", stderr: "boom"},
-	}}
-	result, err := newPipeline(t, fake, mapFetcher{t: t}).Execute(context.Background(),
-		job(contract.JobKindSubmission, testCase("1", "in", "other\n", false)))
-	require.NoError(t, err)
-	assert.Nil(t, result.Tests[0].Stdout)
-	assert.Nil(t, result.Tests[0].Stderr)
-	assert.Nil(t, result.Tests[0].StdoutPreview)
-}
-
-func TestCaptureKeepsTheStartAndSaysHowBigTheOutputWas(t *testing.T) {
-	long := strings.Repeat("abcdefghij", 10)
-	fake := &fakeSandbox{t: t, compileOK: true, byInput: map[string]fakeRun{"in": {status: sandbox.StatusOK, output: long}}}
-	request := withCapture(job(contract.JobKindSubmission, testCase("1", "in", "x", false)), 25, 0, nil)
-	result, err := newPipeline(t, fake, mapFetcher{t: t}).Execute(context.Background(), request)
-	require.NoError(t, err)
-	assert.Equal(t, long[:25], *result.Tests[0].Stdout)
-	assert.Equal(t, int64(100), *result.Tests[0].StdoutSizeBytes)
-	assert.Nil(t, result.Tests[0].Stderr, "stderr_bytes of 0 keeps none")
-}
-
-func TestCaptureNeverSplitsACharacterAndFixesBrokenBytes(t *testing.T) {
-	fake := &fakeSandbox{t: t, compileOK: true, byInput: map[string]fakeRun{
-		"in": {status: sandbox.StatusOK, output: "ก" + "ข" + "\xff!"},
-	}}
-	request := withCapture(job(contract.JobKindVerify, testCase("1", "in", "x", false)), 4, 0, nil)
-	result, err := newPipeline(t, fake, mapFetcher{t: t}).Execute(context.Background(), request)
-	require.NoError(t, err)
-	assert.Equal(t, "ก", *result.Tests[0].Stdout, "4 bytes hold one 3-byte Thai letter and no half of the next")
-
-	request = withCapture(job(contract.JobKindVerify, testCase("1", "in", "x", false)), 100, 0, nil)
-	result, err = newPipeline(t, fake, mapFetcher{t: t}).Execute(context.Background(), request)
-	require.NoError(t, err)
-	assert.Equal(t, "กข\uFFFD!", *result.Tests[0].Stdout)
-}
-
-func TestCaptureStopsWhenTheBudgetIsUsedUp(t *testing.T) {
-	fake := &fakeSandbox{t: t, compileOK: true, byInput: map[string]fakeRun{
-		"in1": {status: sandbox.StatusOK, output: "1234567890"},
-		"in2": {status: sandbox.StatusOK, output: "abcdefghij"},
-		"in3": {status: sandbox.StatusOK, output: "ABCDEFGHIJ"},
-	}}
-	total := 15
-	request := withCapture(job(contract.JobKindVerify,
-		testCase("1", "in1", "x", false), testCase("2", "in2", "x", false), testCase("3", "in3", "x", false)),
-		100, 0, &total)
-	result, err := newPipeline(t, fake, mapFetcher{t: t}).Execute(context.Background(), request)
-	require.NoError(t, err)
-	assert.Equal(t, "1234567890", *result.Tests[0].Stdout)
-	assert.Equal(t, "abcde", *result.Tests[1].Stdout, "the rest of the budget")
-	assert.Nil(t, result.Tests[2].Stdout, "nothing is left for the third test")
-}
-
-func TestOutputLimitTestsDoNotCaptureAGiantOutput(t *testing.T) {
-	fake := &fakeSandbox{t: t, compileOK: true, byInput: map[string]fakeRun{
-		"in": {status: sandbox.StatusOutputLimit, output: "xxxx"},
-	}}
-	request := withCapture(job(contract.JobKindVerify, testCase("1", "in", "x", false)), 100, 0, nil)
-	result, err := newPipeline(t, fake, mapFetcher{t: t}).Execute(context.Background(), request)
-	require.NoError(t, err)
-	assert.Equal(t, contract.TestVerdictOLE, result.Tests[0].Verdict)
-	assert.Nil(t, result.Tests[0].Stdout)
-}
-
-func generateJob(stdoutBytes int, tests ...contract.TestCase) contract.JobRequest {
-	request := withCapture(job(contract.JobKindGenerate, tests...), stdoutBytes, 256, nil)
-	for index := range request.Tests {
-		request.Tests[index].Output = nil
-	}
-	return request
-}
-
-func inputOnly(id, input string) contract.TestCase {
-	return contract.TestCase{Id: id, Input: contract.TestFile{Sha256: input, SizeBytes: int64(len(input))}}
-}
-
-func TestGenerateReturnsTheWholeOutputWithoutComparing(t *testing.T) {
-	fake := &fakeSandbox{t: t, compileOK: true, byInput: map[string]fakeRun{
-		"in1": {status: sandbox.StatusOK, output: "3\n", cpu: 10 * time.Millisecond},
-		"in2": {status: sandbox.StatusOK, output: "7\n"},
-	}}
-	fetcher := &countingFetcher{mapFetcher: mapFetcher{t: t}}
-	result, err := newPipeline(t, fake, fetcher).Execute(context.Background(),
-		generateJob(1024, inputOnly("1", "in1"), inputOnly("2", "in2")))
-	require.NoError(t, err)
-	assert.Equal(t, contract.VerdictAC, result.Verdict)
-	assert.Equal(t, "1=AC 2=AC", verdicts(result))
-	assert.Equal(t, "3\n", *result.Tests[0].Stdout)
-	assert.Equal(t, "7\n", *result.Tests[1].Stdout)
-	assert.Equal(t, []string{"in1", "in2"}, fetcher.fetched, "only the inputs are downloaded")
-	assert.Equal(t, 2, result.Summary.Passed)
-}
-
-func TestGenerateRunsEveryTestEvenAfterAFailureAndReportsWhy(t *testing.T) {
-	fake := &fakeSandbox{t: t, compileOK: true, byInput: map[string]fakeRun{
-		"in1": {status: sandbox.StatusTimeLimit},
-		"in2": {status: sandbox.StatusRuntimeError, stderr: "Traceback: /box/main.py line 2\n"},
-		"in3": {status: sandbox.StatusOK, output: "fine\n"},
-	}}
-	result, err := newPipeline(t, fake, mapFetcher{t: t}).Execute(context.Background(),
-		generateJob(1024, inputOnly("1", "in1"), inputOnly("2", "in2"), inputOnly("3", "in3")))
-	require.NoError(t, err)
-	assert.Equal(t, "1=TLE 2=RE 3=AC", verdicts(result))
-	assert.Equal(t, contract.VerdictTLE, result.Verdict)
-	assert.Equal(t, "Traceback: main.py line 2\n", *result.Tests[1].Stderr)
-	assert.Equal(t, "fine\n", *result.Tests[2].Stdout)
-}
-
-func TestGenerateRefusesAnOutputThatWouldBeCut(t *testing.T) {
-	fake := &fakeSandbox{t: t, compileOK: true, byInput: map[string]fakeRun{
-		"in": {status: sandbox.StatusOK, output: strings.Repeat("9", 50)},
-	}}
-	result, err := newPipeline(t, fake, mapFetcher{t: t}).Execute(context.Background(),
-		generateJob(10, inputOnly("1", "in")))
-	require.NoError(t, err)
-	assert.Equal(t, "1=OLE", verdicts(result))
-	assert.Nil(t, result.Tests[0].Stdout, "an incomplete output is never offered as the answer")
-}
-
-func TestGenerateWithACompilationErrorReportsIt(t *testing.T) {
-	fake := &fakeSandbox{t: t, compileOK: false, compileLog: "main.cpp:1: error\n"}
-	result, err := newPipeline(t, fake, mapFetcher{t: t}).Execute(context.Background(),
-		generateJob(1024, inputOnly("1", "in")))
-	require.NoError(t, err)
-	assert.Equal(t, contract.VerdictCE, result.Verdict)
-	assert.False(t, result.Compile.Ok)
 }

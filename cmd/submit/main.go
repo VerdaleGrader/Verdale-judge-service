@@ -122,7 +122,7 @@ func buildJob(problemDir, sourcePath string, kind contract.JobKind, callbackURL,
 			return contract.JobRequest{}, err
 		}
 		sample := samples[id]
-		tests = append(tests, contract.TestCase{Id: id, Input: input, Output: &output, Sample: &sample})
+		tests = append(tests, contract.TestCase{Id: id, Input: input, Output: output, Sample: &sample})
 	}
 	return contract.JobRequest{
 		JobId:       uuid.New(),
