@@ -25,7 +25,6 @@ const (
 
 // Defines values for JobKind.
 const (
-	JobKindGenerate   JobKind = "generate"
 	JobKindSubmission JobKind = "submission"
 	JobKindVerify     JobKind = "verify"
 )
@@ -73,21 +72,6 @@ const (
 	VerdictTLE Verdict = "TLE"
 	VerdictWA  Verdict = "WA"
 )
-
-// Capture Ask Judge to send back what the program printed, for every test that ran
-// (hidden tests too: Core decides who may see it). Judge keeps to
-// `total_bytes` for the whole job; tests after the budget is used come
-// back without `stdout`/`stderr`. Text is valid UTF-8 (invalid bytes become U+FFFD).
-type Capture struct {
-	// StderrBytes Keep at most this many bytes of standard error per test. 0 keeps none.
-	StderrBytes *int `json:"stderr_bytes,omitempty"`
-
-	// StdoutBytes Keep at most this many bytes of standard output per test. 0 keeps none.
-	StdoutBytes *int `json:"stdout_bytes,omitempty"`
-
-	// TotalBytes Budget for all captured text of the job.
-	TotalBytes *int `json:"total_bytes,omitempty"`
-}
 
 // Checker Output checker. `line` ignores trailing whitespace on each line and trailing blank lines.
 type Checker string
@@ -142,23 +126,12 @@ type JobAccepted struct {
 
 // JobKind `submission` stops at the first test that is not AC (remaining tests
 // are SKIPPED). `verify` runs every test (used by the publish gate).
-// `generate` runs every test input through the program and reports what it
-// printed (it needs `capture.stdout_bytes`); the expected output is not
-// compared, so `tests[].output` may be left out. A test whose output is
-// larger than `capture.stdout_bytes` is reported as OLE (the output would be
-// incomplete). Used to create expected outputs from a reference solution.
 type JobKind string
 
 // JobRequest defines model for JobRequest.
 type JobRequest struct {
 	// CallbackUrl Where Judge POSTs the JobResult. Must match Judge's allow-list.
 	CallbackUrl string `json:"callback_url"`
-
-	// Capture Ask Judge to send back what the program printed, for every test that ran
-	// (hidden tests too: Core decides who may see it). Judge keeps to
-	// `total_bytes` for the whole job; tests after the budget is used come
-	// back without `stdout`/`stderr`. Text is valid UTF-8 (invalid bytes become U+FFFD).
-	Capture *Capture `json:"capture,omitempty"`
 
 	// Checker Output checker. `line` ignores trailing whitespace on each line and trailing blank lines.
 	Checker *Checker `json:"checker,omitempty"`
@@ -168,11 +141,6 @@ type JobRequest struct {
 
 	// Kind `submission` stops at the first test that is not AC (remaining tests
 	// are SKIPPED). `verify` runs every test (used by the publish gate).
-	// `generate` runs every test input through the program and reports what it
-	// printed (it needs `capture.stdout_bytes`); the expected output is not
-	// compared, so `tests[].output` may be left out. A test whose output is
-	// larger than `capture.stdout_bytes` is reported as OLE (the output would be
-	// incomplete). Used to create expected outputs from a reference solution.
 	Kind JobKind `json:"kind"`
 
 	// Language Language code. Core checks the problem's allowed languages using these codes.
@@ -196,11 +164,6 @@ type JobResult struct {
 
 	// Kind `submission` stops at the first test that is not AC (remaining tests
 	// are SKIPPED). `verify` runs every test (used by the publish gate).
-	// `generate` runs every test input through the program and reports what it
-	// printed (it needs `capture.stdout_bytes`); the expected output is not
-	// compared, so `tests[].output` may be left out. A test whose output is
-	// larger than `capture.stdout_bytes` is reported as OLE (the output would be
-	// incomplete). Used to create expected outputs from a reference solution.
 	Kind    JobKind       `json:"kind"`
 	Summary ResultSummary `json:"summary"`
 
@@ -277,13 +240,13 @@ type SystemError struct {
 
 // TestCase defines model for TestCase.
 type TestCase struct {
-	Id     string    `json:"id"`
-	Input  TestFile  `json:"input"`
-	Output *TestFile `json:"output,omitempty"`
+	Id     string   `json:"id"`
+	Input  TestFile `json:"input"`
+	Output TestFile `json:"output"`
 
 	// Sample Sample tests are visible to solvers. Only for sample tests does the
-	// result carry `stdout_preview` and `checker_message`, unless the job
-	// asks for `capture`; hidden test content otherwise never leaves Judge.
+	// result carry `stdout_preview` and `checker_message`; hidden test
+	// content never leaves Judge.
 	Sample *bool `json:"sample,omitempty"`
 }
 
@@ -305,22 +268,8 @@ type TestResult struct {
 	MemoryKb int  `json:"memory_kb"`
 	Signal   *int `json:"signal,omitempty"`
 
-	// Stderr Start of standard error, at most `capture.stderr_bytes`, host paths removed.
-	Stderr *string `json:"stderr,omitempty"`
-
-	// StderrSizeBytes Full size of standard error. With `stderr`.
-	StderrSizeBytes *int64 `json:"stderr_size_bytes,omitempty"`
-
-	// Stdout Start of the program output, at most `capture.stdout_bytes`. Only when the job
-	// asked for `capture`, for every test that ran. For `generate` jobs this is the
-	// complete output of a test that finished normally.
-	Stdout *string `json:"stdout,omitempty"`
-
 	// StdoutPreview First bytes of the program output. Sample tests only.
 	StdoutPreview *string `json:"stdout_preview,omitempty"`
-
-	// StdoutSizeBytes Full size of the program output, so Core can tell it was cut. With `stdout`.
-	StdoutSizeBytes *int64 `json:"stdout_size_bytes,omitempty"`
 
 	// TimeMs CPU time used. 0 for SKIPPED.
 	TimeMs  int         `json:"time_ms"`
