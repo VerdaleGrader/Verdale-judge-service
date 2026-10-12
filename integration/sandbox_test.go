@@ -53,7 +53,7 @@ func newPipeline(t *testing.T) (*pipeline.Pipeline, []contract.TestCase) {
 		input := store(t, storageDir, filepath.Join(problemDir, "tests", id+".in"))
 		output := store(t, storageDir, filepath.Join(problemDir, "tests", id+".out"))
 		sample := id == "1"
-		tests = append(tests, contract.TestCase{Id: id, Input: input, Output: output, Sample: &sample})
+		tests = append(tests, contract.TestCase{Id: id, Input: input, Output: &output, Sample: &sample})
 	}
 
 	compile := cfg.Sandbox.Compile
@@ -170,4 +170,42 @@ func verdictsOf(result contract.JobResult) []contract.TestVerdict {
 		verdicts = append(verdicts, test.Verdict)
 	}
 	return verdicts
+}
+
+func TestCaptureAndGenerateWithTheRealSandbox(t *testing.T) {
+	p, tests := newPipeline(t)
+	source, err := os.ReadFile(filepath.Join(problemDir, "solutions", "ac.py"))
+	require.NoError(t, err)
+	stdout, stderr := 4096, 1024
+	run := func(kind contract.JobKind, withOutputs bool) contract.JobResult {
+		cases := append([]contract.TestCase(nil), tests...)
+		if !withOutputs {
+			for index := range cases {
+				cases[index].Output = nil
+			}
+		}
+		result, err := p.Execute(context.Background(), contract.JobRequest{
+			JobId: uuid.New(), Kind: kind, Language: contract.LanguagePython, Source: string(source),
+			Limits:  contract.Limits{TimeMs: 1000, MemoryKb: 65536},
+			Capture: &contract.Capture{StdoutBytes: &stdout, StderrBytes: &stderr},
+			Tests:   cases, CallbackUrl: "http://core/",
+		})
+		require.NoError(t, err)
+		return result
+	}
+
+	// A normal job gets the output of hidden tests too, once Core asks.
+	verified := run(contract.JobKindVerify, true)
+	require.Equal(t, contract.VerdictAC, verified.Verdict)
+	for _, test := range verified.Tests {
+		require.NotNil(t, test.Stdout, "test %s", test.Id)
+		require.NotNil(t, test.StdoutSizeBytes)
+	}
+
+	// A generate job needs no expected outputs and returns what the program printed.
+	generated := run(contract.JobKindGenerate, false)
+	require.Equal(t, contract.VerdictAC, generated.Verdict)
+	for index, test := range generated.Tests {
+		assert.Equal(t, *verified.Tests[index].Stdout, *test.Stdout, "test %s", test.Id)
+	}
 }
