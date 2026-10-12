@@ -268,7 +268,7 @@ components:
         stdout_bytes:
           type: integer
           minimum: 0
-          maximum: 1048576
+          maximum: 8388608
           default: 0
           description: Keep at most this many bytes of standard output per test. 0 keeps none.
         stderr_bytes:
@@ -280,7 +280,7 @@ components:
         total_bytes:
           type: integer
           minimum: 1
-          maximum: 8388608
+          maximum: 16777216
           default: 2097152
           description: Budget for all captured text of the job.
     TestCase:

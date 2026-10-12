@@ -37,9 +37,9 @@ const (
 	MaxTestIDLength  = 64
 	MaxCallbackBytes = 2048
 
-	MaxCaptureStdoutBytes = 1048576
+	MaxCaptureStdoutBytes = 8388608
 	MaxCaptureStderrBytes = 16384
-	MaxCaptureTotalBytes  = 8388608
+	MaxCaptureTotalBytes  = 16777216
 )
 
 var (
