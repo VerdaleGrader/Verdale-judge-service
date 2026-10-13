@@ -9,6 +9,32 @@ Versions follow semver. The version in `VERSION` must match `info.version` of bo
 - A new `Verdict` or `Language` value is additive for Judge but needs Core and Frontend to know it before Judge starts emitting it: deploy Core and Frontend first.
 - After changing anything here, bump `VERSION` and both `info.version`, regenerate code in this repo (`npm run contracts:generate`), then each consumer re-pins with its own `contracts:sync` script.
 
+## 0.8.0 (2026-10-13)
+
+- Additive. Publish gate and versions (GRD-50 to GRD-54, GRD-116, GRD-117):
+  - **Version number `vMajor.Minor`.** `ProblemVersion` gains `major` (same as `number`), `minor`, `label`; `status` gains `verifying` and `verified` (`draft` -> `verifying` -> `verified` -> `published`). `Problem` and `ProblemSummary` gain `version_minor` and `version_label`. The first publish is v1.0.
+  - **Verify.** `POST .../verify` starts a verification run (the primary reference solution against every test, hidden ones included, as a Judge `verify` job); `GET .../verify` returns the latest `VerificationRun` (status, per-test results, slowest time and peak memory, `valid` = still matches the content hash). `ProblemEditor.verification` carries it.
+  - **Publish rules.** `PublishCheck.key` gains `limits`, `hidden_tests` and `verified`; `ProblemConstraints.publish.min_hidden_tests` (configurable). `ProblemEditor.open_version` is the published version solvers use while `version` may be a Major draft. Publishing now requires a valid passing verification.
+  - **Minor and Major updates.** `POST .../updates` (`PublishedUpdateRequest`, `UpdateOutcome`): Core classifies the update from the fields that change (`ProblemConstraints.version_fields` lists the Major and Minor groups) and from `force_major`. Minor is applied directly to the open version (Minor + 1, history kept, optimistic lock with `expected_version`, 409 `VERSION_CONFLICT`); Major creates a draft of the next Major, which has to pass verify and publish. `POST/DELETE .../draft` start or discard a Major draft (needed to change tests and reference solutions).
+  - **History.** `GET .../history` (`VersionHistoryPage`) lists updates and state changes (who, when, fields, old and new value) for staff.
+  - `SubmissionSummary` gains `version_major` and `outdated` (a newer Major is published; the result is kept, not re-judged).
+- Judge contract: only the version is bumped. The `verify` job kind already exists.
+- Error codes added: `VERIFY_BLOCKED`, `VERIFY_IN_PROGRESS`, `NO_VERIFICATION`, `VERSION_CONFLICT`, `DRAFT_EXISTS`, `NO_DRAFT`, `NOT_PUBLISHED`, `MAJOR_FIELD_LOCKED`.
+- Deploy order: Core first (migrations), then Frontend re-pins with `contracts:sync`. Judge needs no deploy.
+
+## 0.7.0 (2026-10-13)
+
+- Additive. `SubmissionSummary.number` (GRD-115): the submission's place among its author's submissions of the problem, oldest first ("Submission #3" in the solve page). Present on every summary: create, list, `best` and detail.
+- Deploy order: Core first, then Frontend re-pins with `contracts:sync`. No migration. Judge needs no deploy; its contract only has its version bumped.
+
+## 0.6.0 (2026-10-13)
+
+- Additive. Previous submissions of one's own, with per-test summary and Best Submission (GRD-113, for GRD-112):
+  - `SubmissionSummary.test_runs` (new `TestRun` schema): the verdicts of the tests in judging order as runs, in every list item, create response and detail. Replaces fetching each submission to draw its progress bar.
+  - `SubmissionPage.best`: with `scope=mine`, the caller's best submission of the problem (most tests passed, then the earliest sent; never an unfinished one, an ISE or one that passed no test). Null for `scope=all`.
+  - Nothing else changes: `GET /api/v1/submissions/{id}` already returns `source` to its author and staff, and a problem has at most 100 tests (`TEST_LIMITS.max_count`), so its `results` stay small.
+- Deploy order: Core first (migration `submission_best_index` adds an index), then Frontend re-pins with `contracts:sync`. Judge needs no deploy; its contract only has its version bumped.
+
 ## 0.5.0 (2026-10-12)
 
 - Additive. Roles, Space-wide submissions for staff and the testcases page with Generate (GRD-93, GRD-96, GRD-97, GRD-108):
