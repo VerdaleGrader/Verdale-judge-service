@@ -42,5 +42,9 @@ pipeline {
         failure {
             echo "🚨 Deployment failed!"
         }
+        always {
+            echo "🧹 Cleaning up environment file..."
+            sh 'rm -f .env'
+        }
     }
 }
