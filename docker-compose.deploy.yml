@@ -1,0 +1,57 @@
+# Deployed by Jenkins (see Jenkinsfile). Settings come from the .env file the
+# pipeline copies from the `verdale-judge-service-prod` credential.
+# Local development uses docker-compose.yml instead.
+#
+# Judge needs a delegated cgroup for isolate, so the container is privileged
+# and the agent must be Linux with cgroup v2.
+
+services:
+  redis:
+    image: redis:7.4.1-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
+    container_name: verdale-judge-service-redis
+    restart: always
+    volumes:
+      - redis-data:/data
+    networks:
+      - verdale-judge-network
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+  judge:
+    build:
+      context: .
+      target: judge
+      args:
+        VERSION: ${BUILD_VERSION:-dev}
+    image: verdale-judge-service:${BUILD_VERSION:-dev}
+    container_name: verdale-judge-service
+    restart: always
+    privileged: true
+    cgroup: private
+    env_file: .env
+    environment:
+      VERDALE_JUDGE_REDIS_ADDR: redis:6379
+      VERDALE_JUDGE_REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - judge-cache:/var/lib/verdale-judge/cache
+    ports:
+      - "${JUDGE_PORT:-8081}:8081"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+    stop_grace_period: 2m
+    networks:
+      - verdale-judge-network
+networks:
+  verdale-judge-network:
+    driver: bridge
+volumes:
+  redis-data:
+  judge-cache:
