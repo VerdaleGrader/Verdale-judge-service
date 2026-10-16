@@ -52,3 +52,37 @@ func TestParseKeyring(t *testing.T) {
 	_, err = ParseKeyring("")
 	assert.Error(t, err)
 }
+
+func TestWorkerConcurrencyFollowsTheMachine(t *testing.T) {
+	cases := map[string]struct {
+		configured int
+		cpuset     string
+		numCPU     int
+		expected   int
+	}{
+		"explicit number is kept":      {configured: 3, cpuset: "", numCPU: 16, expected: 3},
+		"auto with a cpuset":           {configured: 0, cpuset: "2-5", numCPU: 16, expected: 4},
+		"auto without a cpuset":        {configured: 0, cpuset: "", numCPU: 8, expected: 7},
+		"auto on a one-core machine":   {configured: 0, cpuset: "", numCPU: 1, expected: 1},
+		"auto with a scattered cpuset": {configured: 0, cpuset: "1,3,5", numCPU: 8, expected: 3},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := &Configuration{Worker: WorkerConfig{Concurrency: testCase.configured}, Sandbox: SandboxConfig{Cpuset: testCase.cpuset}}
+			cfg.resolveWorkerConcurrency(testCase.numCPU)
+			assert.Equal(t, testCase.expected, cfg.Worker.Concurrency)
+		})
+	}
+}
+
+func TestValidateRefusesMoreWorkersThanCores(t *testing.T) {
+	cfg := &Configuration{Worker: WorkerConfig{Concurrency: 5, ShutdownTimeoutSeconds: 1}, Sandbox: SandboxConfig{Cpuset: "2-4"}}
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "more than the 3 cores in sandbox.cpuset")
+
+	cfg.Sandbox.Cpuset = "x"
+	err = cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "sandbox.cpuset")
+}

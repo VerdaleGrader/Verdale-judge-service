@@ -32,6 +32,7 @@
     "isolate_path": "/usr/local/bin/isolate",
     "cgroup_root": "/sys/fs/cgroup",
     "box_id_base": 100,
+    "cpuset": "",
     "work_dir": "/var/lib/verdale-judge/work",
     "path": "/usr/local/bin:/usr/bin:/bin",
     "extra_time_ms": 500,

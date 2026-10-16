@@ -1,6 +1,10 @@
 # /etc/systemd/system/verdale-judge.service
-# Judge runs on the host (not in Docker) so isolate gets a properly
-# delegated cgroup v2 subtree from isolate.service.
+#
+# Judge runs on the host (not in Docker) so isolate gets a properly delegated
+# cgroup v2 subtree from isolate.service. Judge itself is an ordinary,
+# unprivileged user: the only root code on its behalf is the setuid isolate
+# binary, which makes the namespaces and control groups (and locks every box
+# to a core, from the boxN.cpus lines in its configuration).
 [Unit]
 Description=Verdale Judge service
 Requires=isolate.service
@@ -9,9 +13,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+User=verdale-judge
+Group=verdale-judge
 # Secrets (keys, Redis password, R2 read-only token) come from this file,
-# readable by root only. See deploy/systemd/README.md.
+# readable by root only; systemd reads it before dropping privileges.
+# There is no database credential on this machine, by design.
 EnvironmentFile=/etc/verdale-judge/judge.env
 Environment=VERDALE_JUDGE_CONFIG=/etc/verdale-judge/config.json
 ExecStart=/usr/local/bin/verdale-judge
@@ -20,7 +26,31 @@ RestartSec=5
 # Must exceed worker.shutdown_timeout_seconds so running jobs can finish.
 TimeoutStopSec=330
 KillSignal=SIGTERM
+
+# --- Limits for Judge itself. The programs it judges run in isolate's own
+# cgroups (isolate.slice, see isolate.slice.d/), not in this one. ---
+MemoryMax=2G
+TasksMax=2048
 LimitNOFILE=65536
+LimitCORE=0
+# Keep Judge, Redis and the OS on the cores the sandboxes do not use.
+# Same as the complement of sandbox.cpuset; install.sh fills it in.
+CPUAffinity=0-1
+
+# --- Hardening that isolate can live with. NoNewPrivileges, a capability
+# bounding set and ProtectControlGroups are deliberately NOT set: isolate is
+# setuid root and needs all three to make namespaces and cgroups. ---
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/verdale-judge /var/local/lib/isolate /run/isolate
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
+LockPersonality=true
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

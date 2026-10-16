@@ -97,3 +97,34 @@ func TestVerifyRejections(t *testing.T) {
 	_, err = verifier.Verify(signed("old", secret, now), http.MethodPost, "/internal/jobs", body)
 	assert.ErrorIs(t, err, ErrInvalidSignature, "key id does not match the secret used")
 }
+
+// The rotation of a key (Core's docs/secrets.md): both keys are accepted while
+// the sender changes over, and the old one stops working once it is removed.
+func TestKeyRotationNeedsNoDowntime(t *testing.T) {
+	oldSecret := []byte("ffffffffffffffffffffffffffffffff")
+	newSecret := []byte("0123456789abcdef0123456789abcdef")
+	now := time.Unix(1_800_000_000, 0)
+	body := []byte(`{"job":1}`)
+	sendWith := func(keyID string, secret []byte) http.Header {
+		request, _ := http.NewRequest(http.MethodPost, "http://judge/internal/jobs", nil)
+		Signer{KeyID: keyID, Secret: secret, Now: func() time.Time { return now }}.SignRequest(request, "/internal/jobs", body)
+		return request.Header
+	}
+	check := func(keyring map[string][]byte, header http.Header) error {
+		_, err := Verifier{Keyring: keyring, Tolerance: 300 * time.Second, Now: func() time.Time { return now }}.Verify(header, http.MethodPost, "/internal/jobs", body)
+		return err
+	}
+
+	// 1. Only the old key exists; the sender uses it.
+	require.NoError(t, check(map[string][]byte{"core-1": oldSecret}, sendWith("core-1", oldSecret)))
+	// 2. The receiver learns the new key first: requests with either key pass, so the sender can change at any moment.
+	both := map[string][]byte{"core-1": oldSecret, "core-2": newSecret}
+	require.NoError(t, check(both, sendWith("core-1", oldSecret)), "a request already on its way with the old key")
+	require.NoError(t, check(both, sendWith("core-2", newSecret)), "the sender has moved to the new key")
+	// 3. The old key is removed: it is refused, the new one still works.
+	onlyNew := map[string][]byte{"core-2": newSecret}
+	assert.ErrorIs(t, check(onlyNew, sendWith("core-1", oldSecret)), ErrUnknownKeyID)
+	assert.NoError(t, check(onlyNew, sendWith("core-2", newSecret)))
+	// A new key id that was never added is not guessed from the old one.
+	assert.ErrorIs(t, check(map[string][]byte{"core-1": oldSecret}, sendWith("core-2", newSecret)), ErrUnknownKeyID)
+}

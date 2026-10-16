@@ -7,7 +7,7 @@ PROBLEM ?= examples/aplusb
 SOURCE ?= examples/aplusb/solutions/ac.cpp
 KIND ?= submission
 
-.PHONY: check lint fmt test test-integration test-resilience build run generate contracts-sync contracts-check up down logs submit submit-all clean
+.PHONY: check lint fmt test test-integration test-resilience benchmark benchmark-host benchmark-compare build run generate contracts-sync contracts-check up down logs submit submit-all clean
 
 ## check: everything CI runs, in one command (lint, unit tests, contract check)
 check: lint test contracts-check
@@ -30,6 +30,24 @@ test-integration:
 	docker compose -f docker-compose.test.yml build integration
 	docker compose -f docker-compose.test.yml run --rm integration; status=$$?; \
 	docker compose -f docker-compose.test.yml down -v >/dev/null 2>&1; exit $$status
+
+## benchmark: how steady is the measured time? Runs in the test container, saves a report in docs/benchmarks
+## (ROUNDS, PARALLEL, LABEL: see integration/benchmark_test.go)
+benchmark:
+	docker compose -f docker-compose.test.yml build integration
+	mkdir -p docs/benchmarks
+	docker compose -f docker-compose.test.yml run --rm -v "$(CURDIR)/docs/benchmarks:/src/docs/benchmarks" \
+		-e BENCHMARK_ROUNDS -e BENCHMARK_PARALLEL -e BENCHMARK_LABEL -e BENCHMARK_MAX_SPREAD_PCT \
+		integration go test -count=1 -tags "integration benchmark" -run TestTimingBenchmark -v ./integration/...; status=$$?; \
+	docker compose -f docker-compose.test.yml down -v >/dev/null 2>&1; exit $$status
+
+## benchmark-host: the same on the Judge machine itself, as root (needs isolate, the toolchains and Go)
+benchmark-host:
+	$(GO) test -count=1 -tags "integration benchmark" -run TestTimingBenchmark -v ./integration/...
+
+## benchmark-compare: BEFORE=docs/benchmarks/a.json AFTER=docs/benchmarks/b.json
+benchmark-compare:
+	$(GO) run ./cmd/benchcompare $(BEFORE) $(AFTER)
 
 ## test-resilience: kill Judge mid-job and restart Redis with jobs queued (needs `make up`)
 test-resilience:

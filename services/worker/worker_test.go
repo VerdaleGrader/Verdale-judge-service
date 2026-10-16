@@ -157,3 +157,51 @@ func TestDeadLetteredJobReportsISE(t *testing.T) {
 	assert.Equal(t, contract.VerdictISE, result.Verdict)
 	assert.Equal(t, pipeline.CodeMaxDeliveriesExceeded, result.Error.Code)
 }
+
+type blockingExecutor struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingExecutor) Execute(ctx context.Context, job contract.JobRequest) (contract.JobResult, error) {
+	close(b.started)
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+		return contract.JobResult{}, ctx.Err()
+	}
+	return contract.JobResult{JobId: job.JobId, Kind: job.Kind, Verdict: contract.VerdictAC}, nil
+}
+
+// On SIGTERM the worker stops taking jobs but lets the running one finish and
+// store its result, so a deploy does not throw work away (GRD-40).
+func TestShutdownDrainsTheRunningJob(t *testing.T) {
+	executor := &blockingExecutor{started: make(chan struct{}), release: make(chan struct{})}
+	h := newHarness(t, executor)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopped := make(chan struct{})
+	go func() { h.worker.Run(ctx); close(stopped) }()
+
+	select {
+	case <-executor.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the job never started")
+	}
+	cancel() // the service is asked to stop while the job is running
+
+	select {
+	case <-stopped:
+		t.Fatal("Run returned while a job was still running")
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(executor.release)
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after the job finished")
+	}
+
+	result := h.storedResult(t)
+	assert.Equal(t, contract.VerdictAC, result.Verdict, "the drained job's result is stored, not lost")
+}

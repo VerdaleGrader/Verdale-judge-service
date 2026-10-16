@@ -1,0 +1,12 @@
+# /usr/local/etc/isolate on the Judge machine. install.sh appends the
+# boxN.cpus lines (one core for each box, GRD-40) below the marker at the end
+# of this file; do not edit below it by hand.
+box_root = /var/local/lib/isolate
+lock_root = /run/isolate/locks
+# Written by isolate-cg-keeper (isolate.service).
+cg_root = auto:/run/isolate/cgroup
+# Uids and gids of the sandboxes: a block of ids that belongs to nobody else.
+# install.sh adds the "isolate" user with a block in /etc/subuid and /etc/subgid.
+subid_user = isolate
+# Only root and the setuid binary create boxes; Judge asks for them as itself.
+# --- pinned by install.sh ---

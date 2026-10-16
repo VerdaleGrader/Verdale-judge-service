@@ -8,7 +8,6 @@ package pipeline
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -293,7 +292,7 @@ func (p *Pipeline) runTest(ctx context.Context, language runner.Language, artifa
 	// programs die on SIGXFSZ, but Python ignores that signal and exits
 	// with an error once the write fails.
 	if status == sandbox.StatusRuntimeError || status == sandbox.StatusSignaled || status == sandbox.StatusOK {
-		if info, err := os.Stat(outputPath); err == nil && info.Size() >= int64(outputKB)*1024 {
+		if size, ok := regularFileSize(outputPath); ok && size >= int64(outputKB)*1024 {
 			status = sandbox.StatusOutputLimit
 		}
 	}
@@ -352,10 +351,10 @@ func compareOutput(checker comparator.Checker, expectedPath, outputPath string) 
 	}
 	defer expectedFile.Close()
 	var actual io.Reader = eofReader{}
-	if outputFile, err := os.Open(outputPath); err == nil {
+	if outputFile, err := openSandboxFile(outputPath); err == nil {
 		defer outputFile.Close()
 		actual = outputFile
-	} else if !errors.Is(err, os.ErrNotExist) {
+	} else if !isAbsent(err) {
 		return "", "", err
 	}
 	check, err := checker.Check(expectedFile, actual)
@@ -373,7 +372,7 @@ type eofReader struct{}
 func (eofReader) Read([]byte) (int, error) { return 0, io.EOF }
 
 func copyFile(source, destination string, mode os.FileMode) error {
-	input, err := os.Open(source)
+	input, err := openSandboxFile(source)
 	if err != nil {
 		return err
 	}
@@ -396,8 +395,8 @@ func copyFile(source, destination string, mode os.FileMode) error {
 // readPrefix reads at most limit bytes from the start of a file. A missing
 // file reads as empty.
 func readPrefix(path string, limit int64) ([]byte, error) {
-	file, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
+	file, err := openSandboxFile(path)
+	if isAbsent(err) {
 		return nil, nil
 	}
 	if err != nil {
