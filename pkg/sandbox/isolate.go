@@ -51,6 +51,14 @@ type IsolateConfig struct {
 	// files so the sandboxed program cannot tamper with them.
 	MetaDir string
 	Runner  CommandRunner
+	// CPUs, when not empty, says which core every box is locked to: box number
+	// i is on CPUs[i % len(CPUs)]. isolate does the locking, from `boxN.cpus`
+	// lines in its own configuration (GRD-40); Judge writes no cgroup files
+	// and needs no privilege for it. CheckEnvironment runs a probe in every
+	// box and refuses to start if one is not on its core, so a missing line
+	// cannot silently make times unfair. With at least as many cores as
+	// boxes, no two boxes share one.
+	CPUs []int
 }
 
 // Isolate is the Sandbox backed by the isolate binary in control group mode.
@@ -83,7 +91,11 @@ func (s *Isolate) CheckEnvironment(ctx context.Context) error {
 		return fmt.Errorf("cgroup v2 is not mounted at %s (isolate needs the unified hierarchy): %w", s.config.CgroupRoot, err)
 	}
 	available := strings.Fields(string(controllers))
-	for _, required := range []string{"memory", "pids"} {
+	required := []string{"memory", "pids"}
+	if len(s.config.CPUs) > 0 {
+		required = append(required, "cpuset")
+	}
+	for _, required := range required {
 		if !contains(available, required) {
 			return fmt.Errorf("cgroup v2 controller %q is not available at %s (have: %s)", required, s.config.CgroupRoot, strings.Join(available, " "))
 		}
@@ -97,7 +109,10 @@ func (s *Isolate) CheckEnvironment(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("isolate could not create a probe box: %w", err)
 	}
-	return box.Cleanup()
+	if err := box.Cleanup(); err != nil {
+		return err
+	}
+	return s.verifyPinning(ctx)
 }
 
 func (s *Isolate) Acquire(ctx context.Context) (Box, error) {
@@ -118,6 +133,63 @@ func (s *Isolate) Acquire(ctx context.Context) (Box, error) {
 		return nil, fmt.Errorf("isolate --init box %d printed no path", boxID)
 	}
 	return &isolateBox{sandbox: s, id: boxID, dir: filepath.Join(root, "box")}, nil
+}
+
+// CoreFor is the core a box id is locked to, or -1 when pinning is not in use.
+func (s *Isolate) CoreFor(boxID int) int {
+	if len(s.config.CPUs) == 0 {
+		return -1
+	}
+	return s.config.CPUs[(boxID-s.config.BoxIDBase)%len(s.config.CPUs)]
+}
+
+// verifyPinning runs a probe in every box and checks it is on its own core.
+func (s *Isolate) verifyPinning(ctx context.Context) error {
+	if len(s.config.CPUs) == 0 {
+		return nil
+	}
+	var held []Box
+	defer func() {
+		for _, box := range held {
+			_ = box.Cleanup()
+		}
+	}()
+	for range s.config.BoxCount {
+		box, err := s.Acquire(ctx)
+		if err != nil {
+			return fmt.Errorf("pinning probe: %w", err)
+		}
+		held = append(held, box)
+	}
+	for _, box := range held {
+		id := box.(*isolateBox).id
+		want := s.CoreFor(id)
+		if _, err := box.Run(ctx, RunRequest{
+			Args: []string{"/bin/cat", "/proc/self/status"}, Stdout: "pin-probe.txt", Stderr: "pin-probe.err",
+			Limits: Limits{CPUTime: 5 * time.Second, WallTime: 10 * time.Second, MemoryKB: 65536, Processes: 1},
+		}); err != nil {
+			return fmt.Errorf("pinning probe in box %d: %w", id, err)
+		}
+		status, err := os.ReadFile(filepath.Join(box.Dir(), "pin-probe.txt"))
+		if err != nil {
+			return fmt.Errorf("pinning probe in box %d: %w", id, err)
+		}
+		if got := allowedCPUs(string(status)); got != strconv.Itoa(want) {
+			return fmt.Errorf("box %d may run on cores %q but must be locked to core %d: add \"box%d.cpus = %d\" to isolate's configuration "+
+				"(deploy/install.sh does it) and make sure the cpuset controller is delegated", id, got, want, id, want)
+		}
+	}
+	return nil
+}
+
+// allowedCPUs reads Cpus_allowed_list from the text of /proc/<pid>/status.
+func allowedCPUs(status string) string {
+	for _, line := range strings.Split(status, "\n") {
+		if value, found := strings.CutPrefix(line, "Cpus_allowed_list:"); found {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 type isolateBox struct {

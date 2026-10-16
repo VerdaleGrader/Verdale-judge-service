@@ -81,11 +81,16 @@ func run(configPath string) error {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
 	}
+	cpus, err := cfg.CPUs()
+	if err != nil {
+		return err
+	}
 	isolate, err := sandbox.NewIsolate(sandbox.IsolateConfig{
 		IsolatePath: cfg.Sandbox.IsolatePath,
 		CgroupRoot:  cfg.Sandbox.CgroupRoot,
 		BoxIDBase:   cfg.Sandbox.BoxIDBase,
 		BoxCount:    cfg.Worker.Concurrency,
+		CPUs:        cpus,
 		MetaDir:     filepath.Join(cfg.Sandbox.WorkDir, "meta"),
 	})
 	if err != nil {
@@ -98,7 +103,7 @@ func run(configPath string) error {
 	if err := runner.CheckVersions(ctx, languages, sandbox.ExecRunner); err != nil {
 		return fmt.Errorf("toolchain check failed, refusing to start: %w", err)
 	}
-	log.Info("sandbox and toolchains ready", zap.Int("boxes", cfg.Worker.Concurrency))
+	log.Info("sandbox and toolchains ready", zap.Int("boxes", cfg.Worker.Concurrency), zap.Ints("cpus", cpus))
 
 	// --- Test files ---
 	var store testfiles.ObjectStore

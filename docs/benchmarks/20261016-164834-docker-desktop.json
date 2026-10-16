@@ -1,0 +1,151 @@
+{
+  "label": "docker-desktop",
+  "taken_at": "2026-10-16T16:46:24Z",
+  "machine": {
+    "hostname": "c42dcfed75ea",
+    "cpu_model": "",
+    "num_cpu": 10,
+    "kernel": "6.12.54-linuxkit",
+    "isolate": "The process isolator 2.7",
+    "toolchains": [
+      "gcc (Debian 12.2.0-14+deb12u1) 12.2.0",
+      "g++ (Debian 12.2.0-14+deb12u1) 12.2.0",
+      "Python 3.11.2"
+    ],
+    "pinned_cpus": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "rounds": 8,
+  "parallel_jobs": 4,
+  "programs": [
+    {
+      "name": "cpu.c",
+      "language": "c",
+      "alone": {
+        "samples": 32,
+        "min_ms": 608,
+        "median_ms": 616,
+        "p95_ms": 651,
+        "max_ms": 663,
+        "mean_ms": 621.1,
+        "stddev_ms": 14.3,
+        "spread_pct": 5.7
+      },
+      "together": {
+        "samples": 128,
+        "min_ms": 659,
+        "median_ms": 697,
+        "p95_ms": 815,
+        "max_ms": 881,
+        "mean_ms": 708.3,
+        "stddev_ms": 42,
+        "spread_pct": 16.9
+      },
+      "slowdown_pct": 13.1
+    },
+    {
+      "name": "sort.cpp",
+      "language": "cpp",
+      "alone": {
+        "samples": 32,
+        "min_ms": 98,
+        "median_ms": 99,
+        "p95_ms": 106,
+        "max_ms": 108,
+        "mean_ms": 100,
+        "stddev_ms": 2.5,
+        "spread_pct": 7.1
+      },
+      "together": {
+        "samples": 128,
+        "min_ms": 98,
+        "median_ms": 108,
+        "p95_ms": 137,
+        "max_ms": 196,
+        "mean_ms": 112.3,
+        "stddev_ms": 15.6,
+        "spread_pct": 26.9
+      },
+      "slowdown_pct": 9.1
+    },
+    {
+      "name": "memory.c",
+      "language": "c",
+      "alone": {
+        "samples": 32,
+        "min_ms": 383,
+        "median_ms": 413,
+        "p95_ms": 465,
+        "max_ms": 491,
+        "mean_ms": 415.2,
+        "stddev_ms": 19.5,
+        "spread_pct": 12.6
+      },
+      "together": {
+        "samples": 128,
+        "min_ms": 855,
+        "median_ms": 907,
+        "p95_ms": 1129,
+        "max_ms": 1281,
+        "mean_ms": 928.7,
+        "stddev_ms": 76.9,
+        "spread_pct": 24.5
+      },
+      "slowdown_pct": 119.6
+    },
+    {
+      "name": "output.c",
+      "language": "c",
+      "alone": {
+        "samples": 32,
+        "min_ms": 82,
+        "median_ms": 91,
+        "p95_ms": 129,
+        "max_ms": 180,
+        "mean_ms": 96.6,
+        "stddev_ms": 19,
+        "spread_pct": 41.8
+      },
+      "together": {
+        "samples": 128,
+        "min_ms": 91,
+        "median_ms": 120,
+        "p95_ms": 153,
+        "max_ms": 207,
+        "mean_ms": 122.6,
+        "stddev_ms": 18.2,
+        "spread_pct": 27.5
+      },
+      "slowdown_pct": 31.9
+    },
+    {
+      "name": "interpreter.py",
+      "language": "python",
+      "alone": {
+        "samples": 32,
+        "min_ms": 192,
+        "median_ms": 208,
+        "p95_ms": 265,
+        "max_ms": 317,
+        "mean_ms": 213.5,
+        "stddev_ms": 24.1,
+        "spread_pct": 27.4
+      },
+      "together": {
+        "samples": 128,
+        "min_ms": 243,
+        "median_ms": 284,
+        "p95_ms": 328,
+        "max_ms": 341,
+        "mean_ms": 286.9,
+        "stddev_ms": 21.9,
+        "spread_pct": 15.5
+      },
+      "slowdown_pct": 36.5
+    }
+  ]
+}

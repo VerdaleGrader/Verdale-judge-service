@@ -30,11 +30,31 @@ const problemDir = "../examples/aplusb"
 
 func newPipeline(t *testing.T) (*pipeline.Pipeline, []contract.TestCase) {
 	t.Helper()
+	return newPipelineWith(t, pipelineOptions{boxes: 2})
+}
+
+// pipelineOptions shapes the sandbox of a test pipeline.
+type pipelineOptions struct {
+	boxes int
+	// cpus says that box i is locked to cpus[i % len(cpus)], as sandbox.cpuset does
+	// in production. isolate does the locking from its configuration; Judge's
+	// startup probe fails the test when the configuration does not match.
+	cpus []int
+}
+
+// boxIDBase is the first isolate box a test uses. The test container's
+// isolate.cf pins boxes 500 to 503; on a Judge machine set INTEGRATION_BOX_BASE
+// (and INTEGRATION_CPUS) to what /etc/verdale-judge/config.json says, with
+// Judge stopped.
+func boxIDBase() int { return environmentNumber("INTEGRATION_BOX_BASE", 500) }
+
+func newPipelineWith(t *testing.T, options pipelineOptions) (*pipeline.Pipeline, []contract.TestCase) {
+	t.Helper()
 	// Secrets are irrelevant here; the file supplies the pinned toolchains.
 	cfg := mustReadLanguages(t)
 
 	isolate, err := sandbox.NewIsolate(sandbox.IsolateConfig{
-		IsolatePath: "/usr/local/bin/isolate", CgroupRoot: "/sys/fs/cgroup", BoxIDBase: 500, BoxCount: 2, MetaDir: t.TempDir(),
+		IsolatePath: "/usr/local/bin/isolate", CgroupRoot: "/sys/fs/cgroup", BoxIDBase: boxIDBase(), BoxCount: options.boxes, CPUs: options.cpus, MetaDir: t.TempDir(),
 	})
 	require.NoError(t, err)
 	require.NoError(t, isolate.CheckEnvironment(context.Background()), "cgroup v2 and isolate must be ready")

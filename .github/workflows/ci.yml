@@ -17,3 +17,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: make test-integration
+
+  secrets:
+    # No secret in the repository, in any commit (GRD-59). Rules and the two narrow
+    # exceptions are in .gitleaks.toml; docs/secrets.md says what to do when this fails.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: No environment file is tracked
+        run: |
+          tracked=$(git ls-files | grep -E '(^|/)\.env(\..*)?$' | grep -v '\.example$' || true)
+          if [ -n "$tracked" ]; then echo "Tracked environment files: $tracked"; exit 1; fi
+      - name: Scan the whole history
+        run: docker run --rm -v "$PWD":/repo zricethezav/gitleaks:v8.28.0 detect --source /repo --config /repo/.gitleaks.toml --redact --no-banner -v

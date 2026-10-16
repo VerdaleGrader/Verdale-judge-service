@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"os"
 	"strings"
 
 	"github.com/kanonkc/verdale-judge-service/pkg/contract"
@@ -44,11 +43,11 @@ func (c *capture) fits(outputPath string) bool {
 	if c == nil {
 		return false
 	}
-	info, err := os.Stat(outputPath)
-	if err != nil {
+	size, ok := regularFileSize(outputPath)
+	if !ok {
 		return true // no output file: the program printed nothing
 	}
-	return info.Size() <= int64(c.stdout) && info.Size() <= int64(c.remaining)
+	return size <= int64(c.stdout) && size <= int64(c.remaining)
 }
 
 // record adds the captured text of one test to its result.
@@ -74,10 +73,7 @@ func (c *capture) take(path string, limit int, scrub bool) (string, int64, bool)
 	if c.remaining <= 0 {
 		return "", 0, false
 	}
-	var size int64
-	if info, err := os.Stat(path); err == nil {
-		size = info.Size()
-	}
+	size, _ := regularFileSize(path)
 	keep := min(limit, c.remaining)
 	raw, _ := readPrefix(path, int64(keep))
 	var text string

@@ -1,0 +1,26 @@
+# Secret scan (GRD-59): the default rules plus two narrow exceptions for values
+# that are public on purpose.
+#
+#  * contracts/hmac-test-vectors.json (shared test vectors) and
+#    contracts/contracts.lock.json (SHA-256 hashes of contract files): the
+#    generic "looks like a key" rule fires on them. Those two files are skipped.
+#  * Made-up secrets in unit tests, which all use obvious placeholders listed
+#    in `stopwords`. A real token in a test file is still found.
+title = "Verdale secret scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public test vectors, hashes of contract files and placeholder secrets in tests"
+paths = [
+  '''contracts/hmac-test-vectors\.json$''',
+  '''contracts/contracts\.lock\.json$''',
+]
+stopwords = [
+  "0123456789abcdef",
+  "fedcba9876543210",
+  "ffffffffffffffff",
+  "test-secret",
+  "not-a-real",
+]

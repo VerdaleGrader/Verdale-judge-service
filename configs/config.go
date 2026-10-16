@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/viper"
+
+	"github.com/kanonkc/verdale-judge-service/pkg/sandbox"
 )
 
 // EnvPrefix is prepended to every environment override, e.g.
@@ -92,6 +95,10 @@ type QueueConfig struct {
 }
 
 type WorkerConfig struct {
+	// Concurrency is the number of jobs judged at once, one isolate box each.
+	// 0 means "match the machine": the size of sandbox.cpuset when it is set,
+	// otherwise the number of CPUs minus one (a core stays free for Judge,
+	// Redis and the OS).
 	Concurrency            int `mapstructure:"concurrency"`
 	ShutdownTimeoutSeconds int `mapstructure:"shutdown_timeout_seconds"`
 }
@@ -105,6 +112,12 @@ type SandboxConfig struct {
 	// BoxIDBase is the first isolate box id; Judge uses
 	// [BoxIDBase, BoxIDBase + worker.concurrency).
 	BoxIDBase int `mapstructure:"box_id_base"`
+	// Cpuset lists the cores sandboxes may use, in the kernel's format
+	// ("2-7" or "1,3,5"). Each box is locked to one of them so parallel runs
+	// never share a core: isolate does it from its own configuration
+	// (boxN.cpus lines, written by deploy/install.sh) and Judge checks at
+	// start that it did. Empty turns pinning off (development).
+	Cpuset string `mapstructure:"cpuset"`
 	// WorkDir holds per-job host files (compiled binaries, meta files).
 	WorkDir string `mapstructure:"work_dir"`
 	// Path is the PATH given to sandboxed processes.
@@ -196,6 +209,7 @@ func Load(path string) (*Configuration, error) {
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
+	cfg.resolveWorkerConcurrency(runtime.NumCPU())
 	if cfg.Queue.ConsumerName == "" {
 		hostname, _ := os.Hostname()
 		cfg.Queue.ConsumerName = fmt.Sprintf("%s-%d", hostname, os.Getpid())
@@ -204,6 +218,21 @@ func Load(path string) (*Configuration, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// CPUs is the parsed sandbox.cpuset (nil when pinning is off).
+func (c *Configuration) CPUs() ([]int, error) { return sandbox.ParseCPUList(c.Sandbox.Cpuset) }
+
+// resolveWorkerConcurrency turns worker.concurrency 0 ("auto") into a number.
+func (c *Configuration) resolveWorkerConcurrency(numCPU int) {
+	if c.Worker.Concurrency != 0 {
+		return
+	}
+	if cores, err := c.CPUs(); err == nil && len(cores) > 0 {
+		c.Worker.Concurrency = len(cores)
+		return
+	}
+	c.Worker.Concurrency = max(1, numCPU-1)
 }
 
 // Validate collects every problem at once so a misconfigured deploy fails
@@ -254,6 +283,11 @@ func (c *Configuration) Validate() error {
 	}
 	if c.Worker.Concurrency < 1 || c.Worker.ShutdownTimeoutSeconds < 1 {
 		add("worker.concurrency and worker.shutdown_timeout_seconds must be positive")
+	}
+	if cores, err := c.CPUs(); err != nil {
+		add("sandbox.cpuset: %v", err)
+	} else if len(cores) > 0 && c.Worker.Concurrency > len(cores) {
+		add("worker.concurrency (%d) is more than the %d cores in sandbox.cpuset: two boxes would share a core and measured time would differ", c.Worker.Concurrency, len(cores))
 	}
 	if c.Sandbox.Driver != "isolate" {
 		add("sandbox.driver must be \"isolate\"")

@@ -1,0 +1,49 @@
+#!/usr/sbin/nft -f
+# Firewall of the Judge machine (GRD-41). Install with deploy/install.sh, which
+# fills in the three values below from /etc/verdale-judge/firewall.env.
+#
+#   CORE_ADDRESS   address(es) of Core: the only machine that may call Judge
+#   ADMIN_CIDR     where administrators connect from (SSH)
+#   METRICS_CIDR   the monitoring server that scrapes /metrics (may be empty)
+#
+# Judge needs from the network: its own API (8081, from Core), SSH (from admins)
+# and, outwards, HTTPS to Core (callbacks) and to R2 (test files), DNS and NTP.
+# There is no database on this machine and nothing else is reachable.
+define CORE_ADDRESS = { 203.0.113.10 }
+define ADMIN_CIDR = { 198.51.100.0/24 }
+define METRICS_CIDR = { 198.51.100.20 }
+
+flush ruleset
+
+table inet verdale {
+  chain input {
+    type filter hook input priority 0; policy drop;
+
+    ct state established,related accept
+    ct state invalid drop
+    iif "lo" accept
+
+    ip protocol icmp icmp type { echo-request, destination-unreachable, time-exceeded } limit rate 10/second accept
+    ip6 nexthdr icmpv6 limit rate 10/second accept
+
+    tcp dport 22 ip saddr $ADMIN_CIDR accept
+    tcp dport 8081 ip saddr $CORE_ADDRESS accept
+    tcp dport 8081 ip saddr $METRICS_CIDR accept
+  }
+
+  chain forward {
+    type filter hook forward priority 0; policy drop;
+  }
+
+  # Outbound: only what Judge uses. A sandboxed program has no network at
+  # all (its own empty network namespace); this is a second wall, not the first.
+  chain output {
+    type filter hook output priority 0; policy drop;
+
+    ct state established,related accept
+    oif "lo" accept
+    udp dport { 53, 123 } accept
+    tcp dport 53 accept
+    tcp dport 443 accept
+  }
+}

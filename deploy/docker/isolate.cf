@@ -7,3 +7,12 @@ cg_root = /sys/fs/cgroup/isolate
 first_uid = 60000
 first_gid = 60000
 num_boxes = 1000
+
+# One core per box for the integration tests, which use boxes 500 to 503
+# (GRD-40). Production has the same lines for its own boxes, written by
+# deploy/install.sh from sandbox.cpuset. The tests check them with the
+# startup probe, exactly as Judge does.
+box500.cpus = 0
+box501.cpus = 1
+box502.cpus = 2
+box503.cpus = 3
